@@ -31,13 +31,15 @@ def create_freekassa_payment(user_id):
     sign_str = f"{FREKASSA_SHOP_ID}:{SUBSCRIPTION_PRICE_RUB}:{FREKASSA_SECRET_KEY1}:RUB:{order_id}"
     sign = hashlib.md5(sign_str.encode()).hexdigest()
 
-    # URL для оплаты
+    # URL для оплаты с добавлением success/failure URL
     payment_url = (
         f"https://pay.freekassa.ru/?m={FREKASSA_SHOP_ID}"
         f"&oa={SUBSCRIPTION_PRICE_RUB}"
         f"&o={order_id}"
         f"&s={sign}"
         f"&currency=RUB"
+        f"&success_url={WEBHOOK_URL}/payment/success"
+        f"&failure_url={WEBHOOK_URL}/payment/failure"
     )
 
     logger.info(f"Freekassa payment created: {order_id}")
@@ -53,7 +55,9 @@ def create_kryptocloud_payment(user_id):
         "shop_id": KRYPTOCLOUD_SHOP_ID,
         "amount": SUBSCRIPTION_PRICE_USD,
         "order_id": order_id,
-        "webhook_url": f"{WEBHOOK_URL}/webhook/cryptocloud"
+        "webhook_url": f"{WEBHOOK_URL}/webhook/cryptocloud",
+        "success_url": f"{WEBHOOK_URL}/payment/success",
+        "cancel_url": f"{WEBHOOK_URL}/payment/cancel"
     }
 
     try:
