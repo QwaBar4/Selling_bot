@@ -1,0 +1,7 @@
+python-telegram-bot[ext]==20.3
+python-dotenv==1.0.0
+flask==2.3.2
+gunicorn==20.1.0
+requests==2.31.0
+ipaddress==1.0.23
+pyopenssl==23.2.0
