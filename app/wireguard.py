@@ -6,8 +6,7 @@ logger = logging.getLogger(__name__)
 
 def generate_wireguard_config(client_private_key, client_address):
     """Генерирует текстовую конфигурацию для клиента WireGuard."""
-    return f"""
-[Interface]
+    return f"""[Interface]
 PrivateKey = {client_private_key}
 Address = {client_address}/32
 DNS = {WG_CLIENT_DNS}
@@ -33,9 +32,13 @@ def generate_client_keys():
 def add_peer_to_server(client_public_key, client_address):
     """Добавляет нового пира на сервер WireGuard."""
     try:
-        # Эта команда требует прав sudo для выполнения
+        # Добавляем пира
         command = f"sudo wg set wg0 peer {client_public_key} allowed-ips {client_address}/32"
         subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        
+        # Сохраняем конфигурацию
+        subprocess.run("sudo wg-quick save wg0", shell=True, check=True, capture_output=True, text=True)
+        
         logger.info(f"Пир {client_public_key} с IP {client_address} добавлен на сервер.")
         return True
     except subprocess.CalledProcessError as e:
