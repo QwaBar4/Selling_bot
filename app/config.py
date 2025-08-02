@@ -28,7 +28,9 @@ SUBSCRIPTION_DAYS = 30        # Длительность подписки в д�
 # --- WireGuard ---
 WG_SERVER_PUBLIC_KEY = os.getenv("WG_SERVER_PUBLIC_KEY")
 WG_SERVER_ENDPOINT = os.getenv("WG_SERVER_ENDPOINT")  # e.g., "YOUR_IPV4:51820"
-WG_CLIENT_DNS = "8.8.8.8, 8.8.4.4"
+WG_CLIENT_DNS = "8.8.8.8, 1.1.1.1"
+WG_TEMP_CONFIG_DURATION_MINUTES = 10
+WG_SERVER_PORT = 51820 
 
 # Сеть для клиентов. Убедитесь, что она соответствует настройкам сервера.
 WG_CLIENT_NETWORK = "10.10.10.0/24"
