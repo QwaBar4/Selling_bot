@@ -23,8 +23,7 @@ from app.database import (
     init_db,
     add_user,
     get_user,
-    update_user_subscription,
-    get_next_available_ip
+    update_user_subscription
 )
 from app.payments import (
     create_freekassa_payment,
@@ -205,10 +204,6 @@ def main():
     
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Добавляем периодическую задачу очистки каждые 5 минут
-    job_queue = application.job_queue
-    job_queue.run_repeating(periodic_cleanup, interval=300, first=10)
-    
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -231,6 +226,16 @@ def main():
     )
 
     application.add_handler(conv_handler)
+    
+    # Добавляем периодическую задачу очистки каждые 5 минут
+    # Получаем job_queue после создания application
+    job_queue = application.job_queue
+    if job_queue:
+        job_queue.run_repeating(periodic_cleanup, interval=300, first=10)
+        logger.info("Periodic cleanup job scheduled")
+    else:
+        logger.warning("Job queue not available, periodic cleanup disabled")
+    
     logger.info("Бот запускается в режиме polling...")
     application.run_polling()
 
