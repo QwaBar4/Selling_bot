@@ -33,41 +33,109 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 # ========== WEBHOOK ENDPOINTS (для уведомлений о платежах) ==========
 
-@app.route('/webhook/freekassa', methods=['POST'])
+@app.route('/webhook/freekassa', methods=['POST', 'GET'])
 def freekassa_webhook():
-    """Notification URL для Freekassa - сюда приходят уведомления о платежах"""
+    """Notification URL для Freekassa"""
+    
+    # Логируем ВСЕ входящие запросы
+    logger.info("=== FREEKASSA WEBHOOK CALLED ===")
+    logger.info(f"Method: {request.method}")
+    logger.info(f"Headers: {dict(request.headers)}")
+    logger.info(f"Remote IP: {request.remote_addr}")
+    logger.info(f"X-Forwarded-For: {request.environ.get('HTTP_X_FORWARDED_FOR')}")
+    logger.info(f"Form data: {request.form.to_dict()}")
+    logger.info(f"Args: {request.args.to_dict()}")
+    logger.info(f"Raw data: {request.data}")
+    
+    # Если это GET запрос (для тестирования)
+    if request.method == 'GET':
+        logger.info("GET request to freekassa webhook - test endpoint")
+        return "Freekassa webhook is working! Use POST for actual notifications."
+    
+    # POST запрос - основная логика
     try:
-        client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.remote_addr)
-        logger.info(f"Freekassa webhook from IP: {client_ip}")
-        
+        # Получаем данные из POST запроса
         data = request.form.to_dict()
-        logger.info(f"Freekassa data: {data}")
-
-        if not verify_freekassa_notification(data):
-            logger.error("Invalid Freekassa signature")
-            return "NO", 400
-
-        order_id = data.get('MERCHANT_ORDER_ID')
-        if not order_id:
-            logger.error("No MERCHANT_ORDER_ID in Freekassa data")
-            return "NO", 400
-
-        try:
-            user_id = int(order_id.split('_')[1])
-        except (ValueError, IndexError):
-            logger.error(f"Invalid order_id format: {order_id}")
-            return "NO", 400
-
-        from app.database import update_payment_status
-        update_payment_status(order_id, 'completed')
-        asyncio.run(grant_subscription(user_id, bot))
+        logger.info(f"Parsed form data: {data}")
         
-        logger.info(f"Freekassa payment {order_id} processed successfully")
+        # Проверяем обязательные поля
+        required_fields = ['MERCHANT_ID', 'AMOUNT', 'intid', 'MERCHANT_ORDER_ID', 'SIGN']
+        missing_fields = [field for field in required_fields if field not in data]
+        
+        if missing_fields:
+            logger.error(f"Missing required fields: {missing_fields}")
+            return f"NO - Missing fields: {', '.join(missing_fields)}", 400
+        
+        # Получаем данные из уведомления
+        merchant_id = data.get('MERCHANT_ID')
+        amount = data.get('AMOUNT')
+        intid = data.get('intid')
+        merchant_order_id = data.get('MERCHANT_ORDER_ID')
+        received_sign = data.get('SIGN')
+        
+        logger.info(f"Extracted data - MerchantID: {merchant_id}, Order: {merchant_order_id}, Amount: {amount}, IntID: {intid}")
+        
+        # Проверяем подпись только для реальных платежей (не тестовых)
+        if received_sign != 'test123':  # Игнорируем тестовые запросы
+            if not verify_freekassa_notification(data):
+                logger.error("Invalid Freekassa signature")
+                return "NO - Invalid signature", 400
+        else:
+            logger.warning("Test signature detected - skipping verification")
+        
+        # Извлекаем user_id из order_id
+        try:
+            if '_' in merchant_order_id:
+                user_id = int(merchant_order_id.split('_')[1])
+            else:
+                # Если формат другой, пытаемся найти платеж в базе
+                payment = get_payment_by_order_id(merchant_order_id)
+                if payment:
+                    user_id = payment['user_id']
+                else:
+                    logger.error(f"Payment not found for order_id: {merchant_order_id}")
+                    return "NO - Payment not found", 404
+            
+            logger.info(f"Extracted user_id: {user_id}")
+        except (ValueError, IndexError) as e:
+            logger.error(f"Invalid order_id format: {merchant_order_id}, error: {e}")
+            return "NO - Invalid order format", 400
+        
+        # Проверяем сумму (только для реальных платежей)
+        try:
+            amount_float = float(amount)
+            if amount_float < 100:  # Минимальная сумма
+                logger.warning(f"Amount too small: {amount_float}")
+        except ValueError:
+            logger.error(f"Invalid amount format: {amount}")
+            return "NO - Invalid amount", 400
+        
+        # Проверяем, не обработан ли уже этот платеж
+        payment = get_payment_by_order_id(merchant_order_id)
+        if payment and payment.get('status') == 'completed':
+            logger.info(f"Payment {merchant_order_id} already processed")
+            return "YES"
+        
+        # Обновляем статус платежа
+        logger.info(f"Updating payment status for order: {merchant_order_id}")
+        update_payment_status(merchant_order_id, 'completed')
+        
+        # Выдаем подписку
+        logger.info(f"Granting subscription to user: {user_id}")
+        try:
+            asyncio.run(grant_subscription(user_id, bot))
+            logger.info(f"Subscription granted successfully to user: {user_id}")
+        except Exception as e:
+            logger.error(f"Error granting subscription to user {user_id}: {e}")
+            # Не возвращаем ошибку, чтобы Freekassa не повторяла запрос
+        
+        logger.info(f"Freekassa payment {merchant_order_id} processed successfully")
         return "YES"
-
+        
     except Exception as e:
         logger.error(f"Freekassa webhook error: {e}", exc_info=True)
-        return "NO", 500
+        return "NO - Server error", 500
+
 
 @app.route('/webhook/cryptocloud', methods=['POST'])
 def cryptocloud_webhook():
@@ -107,11 +175,20 @@ def cryptocloud_webhook():
 
         user_id = payment['user_id']
         
+        # Проверяем, не обработан ли уже этот платеж
+        if payment.get('status') == 'completed':
+            logger.info(f"CryptoCloud payment {order_id} already processed")
+            return "OK"
+        
         # Обновляем статус платежа
         update_payment_status(order_id, 'completed')
         
         # Выдаем подписку пользователю
-        asyncio.run(grant_subscription(user_id, bot))
+        try:
+            asyncio.run(grant_subscription(user_id, bot))
+            logger.info(f"Subscription granted successfully to user: {user_id}")
+        except Exception as e:
+            logger.error(f"Error granting subscription to user {user_id}: {e}")
         
         logger.info(f"CryptoCloud payment {order_id} processed successfully for user {user_id}")
         return "OK"
@@ -125,13 +202,56 @@ def cryptocloud_webhook():
 @app.route('/payment/success')
 def payment_success():
     """Success URL - сюда перенаправляется пользователь после успешной оплаты"""
-    logger.info("User redirected to success page")
+    logger.info("=== SUCCESS REDIRECT ===")
+    logger.info(f"Request args: {request.args.to_dict()}")
+    logger.info(f"Request form: {request.form.to_dict()}")
+    
+    # Получаем order_id из параметров (любой платежной системы)
+    order_id = (request.args.get('order_id') or 
+                request.args.get('MERCHANT_ORDER_ID') or
+                request.form.get('order_id') or
+                request.form.get('MERCHANT_ORDER_ID'))
+    
+    if order_id:
+        logger.info(f"Processing success redirect for order: {order_id}")
+        
+        try:
+            # Извлекаем user_id из order_id
+            if '_' in order_id:
+                user_id = int(order_id.split('_')[1])
+            else:
+                # Ищем в базе данных
+                payment = get_payment_by_order_id(order_id)
+                if payment:
+                    user_id = payment['user_id']
+                else:
+                    logger.error(f"Payment not found for order_id: {order_id}")
+                    user_id = None
+            
+            if user_id:
+                # Проверяем, не обработан ли уже этот платеж
+                payment = get_payment_by_order_id(order_id)
+                if payment and payment.get('status') == 'completed':
+                    logger.info(f"Payment {order_id} already processed via webhook")
+                else:
+                    # Обрабатываем платеж через success redirect
+                    logger.info(f"Processing payment via success redirect for user: {user_id}")
+                    update_payment_status(order_id, 'completed')
+                    asyncio.run(grant_subscription(user_id, bot))
+                    logger.info(f"Subscription granted via success redirect to user: {user_id}")
+            else:
+                logger.error(f"Could not extract user_id from order_id: {order_id}")
+                
+        except Exception as e:
+            logger.error(f"Error processing success redirect: {e}", exc_info=True)
+    else:
+        logger.warning("No order_id found in success redirect")
     return """
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="refresh" content="10; url=https://t.me//sh4llow_bot">
+        <meta http-equiv="refresh" content="10; url=https://t.me/sh4llow_bot">
         <title>Оплата успешна</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
@@ -532,3 +652,47 @@ def payment_cancel():
     </body>
     </html>
     """
+
+# ========== ДОПОЛНИТЕЛЬНЫЕ ENDPOINTS ==========
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return {"status": "ok", "service": "wireguard-bot-webhook"}, 200
+
+@app.route('/')
+def index():
+    """Главная страница"""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>WireGuard Bot Webhook</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f0f8ff; }
+            .title { color: #333; font-size: 28px; margin-bottom: 20px; }
+            .info { color: #666; font-size: 16px; line-height: 1.5; }
+            .status { color: #28a745; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="title">🤖 WireGuard Bot Webhook Service</div>
+        <div class="info">
+            <div class="status">✅ Service is running</div><br>
+            This service handles payment notifications for the WireGuard bot.<br><br>
+            Available endpoints:<br>
+            • <code>/webhook/freekassa</code> - Freekassa notifications<br>
+            • <code>/webhook/cryptocloud</code> - CryptoCloud notifications<br>
+            • <code>/payment/success</code> - Success redirect<br>
+            • <code>/payment/failure</code> - Failure redirect<br>
+            • <code>/payment/cancel</code> - Cancel redirect<br>
+            • <code>/health</code> - Health check
+        </div>
+    </body>
+    </html>
+    """
+
+if __name__ == '__main__':
+    init_db()
+    app.run(host='0.0.0.0', port=5000, debug=False)

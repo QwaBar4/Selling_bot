@@ -92,7 +92,7 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await context.bot.send_document(
             chat_id=user_data['telegram_id'],
             document=bytes(user_data['wireguard_config'], 'utf-8'),
-            filename=f"wg_{user_data['telegram_id']}.conf"
+            filename = f"Sh1M_{str(user_data['telegram_id'])[:4]}.conf"
         )
     else:
         message = "У вас еще нет активной подписки."

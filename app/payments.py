@@ -1,22 +1,79 @@
 import uuid
 import hashlib
-import hmac
 import logging
 import requests
 from app.config import (
     FREKASSA_SHOP_ID, FREKASSA_API_KEY, FREKASSA_SECRET_KEY1, FREKASSA_SECRET_KEY2,
     KRYPTOCLOUD_API_TOKEN, KRYPTOCLOUD_SHOP_ID,
     SUBSCRIPTION_PRICE_RUB, SUBSCRIPTION_PRICE_USD,
-    WEBHOOK_URL
+    WEBHOOK_URL, WEBHOOK_SECRET
 )
 from app import database as db
 
 logger = logging.getLogger(__name__)
 
+def create_kryptocloud_payment(user_id):
+    """Создает платеж через CryptoCloud (рабочая версия с улучшениями)"""
+    order_id = f"{user_id}_{uuid.uuid4()}"
+    url = "https://api.cryptocloud.plus/v2/invoice/create"
+    
+    headers = {
+        "Authorization": KRYPTOCLOUD_API_TOKEN,
+        "Content-Type": "application/json"  # Явно указываем Content-Type
+    }
+    
+    payload = {
+        "shop_id": KRYPTOCLOUD_SHOP_ID,
+        "amount": SUBSCRIPTION_PRICE_USD,
+        "order_id": order_id,
+        "currency": "USD",  # Явно указываем валюту
+        "webhook_url": f"{WEBHOOK_URL}/webhook/cryptocloud"
+    }
+
+    logger.info(f"Creating CryptoCloud payment for order {order_id}")
+    
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=10  # Добавляем таймаут
+        )
+        
+        # Логируем ответ для диагностики
+        logger.info(f"CryptoCloud API response: {response.status_code}, {response.text}")
+        
+        response.raise_for_status()  # Вызовет исключение для 4xx/5xx статусов
+        
+        data = response.json()
+        if data.get("status") == "success":
+            payment_url = data.get("result", {}).get("link")
+            if payment_url:
+                db.add_payment(
+                    user_id=user_id,
+                    amount=SUBSCRIPTION_PRICE_USD,
+                    currency="USD",
+                    payment_system="CryptoCloud",
+                    order_id=order_id,
+                    status="pending"
+                )
+                logger.info(f"CryptoCloud payment created: {order_id}")
+                return payment_url, order_id
+        
+        logger.error(f"CryptoCloud API error response: {data}")
+        return None, None
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"CryptoCloud request failed: {str(e)}")
+        return None, None
+    except Exception as e:
+        logger.error(f"Unexpected error creating CryptoCloud payment: {str(e)}")
+        return None, None
+
 def create_freekassa_payment(user_id):
     """Создает платеж через Freekassa"""
     order_id = f"freekassa_{user_id}_{uuid.uuid4().hex[:8]}"
-
+    
     # Сохраняем платеж в БД
     db.add_payment(
         user_id=user_id,
@@ -26,144 +83,67 @@ def create_freekassa_payment(user_id):
         order_id=order_id,
         status="pending"
     )
-
-    # Формируем подпись
+    
+    # Формируем подпись согласно документации
+    # Формат: m:oa:secret_key:currency:o
     sign_str = f"{FREKASSA_SHOP_ID}:{SUBSCRIPTION_PRICE_RUB}:{FREKASSA_SECRET_KEY1}:RUB:{order_id}"
     sign = hashlib.md5(sign_str.encode()).hexdigest()
-
-    # URL для оплаты с добавлением success/failure URL
+    
+    # Правильный URL согласно документации
     payment_url = (
-        f"https://pay.freekassa.ru/?m={FREKASSA_SHOP_ID}"
+        f"https://pay.fk.money/"
+        f"?m={FREKASSA_SHOP_ID}"
         f"&oa={SUBSCRIPTION_PRICE_RUB}"
+        f"&currency=RUB"
         f"&o={order_id}"
         f"&s={sign}"
-        f"&currency=RUB"
-        f"&success_url={WEBHOOK_URL}/payment/success"
-        f"&failure_url={WEBHOOK_URL}/payment/failure"
+        f"&lang=ru"
     )
-
-    logger.info(f"Freekassa payment created: {order_id}")
+    
+    logger.info(f"Freekassa payment created: {order_id}, URL: {payment_url}")
     return payment_url, order_id
 
-def create_kryptocloud_payment(user_id):
-    """Создает платеж через CryptoCloud"""
-    order_id = f"crypto_{user_id}_{uuid.uuid4().hex[:8]}"
-
-    url = "https://api.cryptocloud.plus/v2/invoice/create"
-    headers = {
-        "Authorization": f"Token {KRYPTOCLOUD_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
-    # Убедимся, что amount передается как число, а не строка
-    try:
-        amount = float(SUBSCRIPTION_PRICE_USD)
-    except (ValueError, TypeError):
-        logger.error(f"Invalid SUBSCRIPTION_PRICE_USD: {SUBSCRIPTION_PRICE_USD}")
-        return None, None
-    
-    payload = {
-        "shop_id": KRYPTOCLOUD_SHOP_ID,
-        "amount": amount,
-        "order_id": order_id,
-        "currency": "USD",  # Явно указываем валюту
-        "webhook_url": f"{WEBHOOK_URL}/webhook/cryptocloud",
-        "success_url": f"{WEBHOOK_URL}/payment/success",
-        "cancel_url": f"{WEBHOOK_URL}/payment/cancel"
-    }
-
-    logger.info(f"CryptoCloud request payload: {payload}")
-    logger.info(f"CryptoCloud headers: {headers}")
-
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        
-        # Логируем детали ответа
-        logger.info(f"CryptoCloud response status: {response.status_code}")
-        logger.info(f"CryptoCloud response headers: {dict(response.headers)}")
-        
-        try:
-            response_text = response.text
-            logger.info(f"CryptoCloud response body: {response_text}")
-        except:
-            logger.warning("Could not log response body")
-
-        if response.status_code == 200:
-            try:
-                data = response.json()
-                logger.info(f"CryptoCloud parsed response: {data}")
-                
-                if data.get("status") == "success":
-                    result = data.get("result", {})
-                    payment_url = result.get("link") or result.get("url")
-                    
-                    if payment_url:
-                        # Сохраняем платеж в БД
-                        db.add_payment(
-                            user_id=user_id,
-                            amount=amount,
-                            currency="USD",
-                            payment_system="CryptoCloud",
-                            order_id=order_id,
-                            status="pending"
-                        )
-                        logger.info(f"CryptoCloud payment created: {order_id}")
-                        return payment_url, order_id
-                    else:
-                        logger.error(f"No payment URL in CryptoCloud response: {result}")
-                else:
-                    logger.error(f"CryptoCloud API returned error status: {data}")
-            except ValueError as e:
-                logger.error(f"CryptoCloud response is not valid JSON: {e}")
-        else:
-            logger.error(f"CryptoCloud API HTTP error: {response.status_code}")
-            try:
-                error_data = response.json()
-                logger.error(f"CryptoCloud error details: {error_data}")
-            except:
-                logger.error(f"CryptoCloud error response (raw): {response.text}")
-
-        return None, None
-
-    except requests.exceptions.Timeout:
-        logger.error("CryptoCloud API timeout")
-        return None, None
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"CryptoCloud connection error: {e}")
-        return None, None
-    except Exception as e:
-        logger.error(f"CryptoCloud payment creation error: {e}")
-        return None, None
 
 def verify_freekassa_notification(data):
     """Проверяет подпись уведомления от Freekassa"""
-    sign_str = (
-        f"{FREKASSA_SHOP_ID}:{data.get('AMOUNT')}:"
-        f"{FREKASSA_SECRET_KEY2}:{data.get('MERCHANT_ORDER_ID')}"
-    )
-    sign = hashlib.md5(sign_str.encode()).hexdigest()
-    return sign == data.get('SIGN')
-
-def test_cryptocloud_connection():
-    """Тестирует подключение к CryptoCloud API"""
-    url = "https://api.cryptocloud.plus/v2/invoice/create"
-    headers = {
-        "Authorization": f"Token {KRYPTOCLOUD_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
-    # Минимальный тестовый запрос
-    test_payload = {
-        "shop_id": KRYPTOCLOUD_SHOP_ID,
-        "amount": 1.0,
-        "order_id": f"test_{uuid.uuid4().hex[:8]}",
-        "currency": "USD"
-    }
-    
     try:
-        response = requests.post(url, headers=headers, json=test_payload, timeout=10)
-        logger.info(f"CryptoCloud test response: {response.status_code} - {response.text}")
-        return response.status_code, response.text
+        merchant_id = data.get('MERCHANT_ID')
+        amount = data.get('AMOUNT')
+        intid = data.get('intid')
+        merchant_order_id = data.get('MERCHANT_ORDER_ID')
+        received_sign = data.get('SIGN')
+        
+        logger.info(f"Signature check data:")
+        logger.info(f"  MERCHANT_ID: {merchant_id}")
+        logger.info(f"  AMOUNT: {amount}")
+        logger.info(f"  intid: {intid}")
+        logger.info(f"  MERCHANT_ORDER_ID: {merchant_order_id}")
+        logger.info(f"  SIGN: {received_sign}")
+        
+        if not all([merchant_id, amount, intid, merchant_order_id, received_sign]):
+            logger.error("Missing required fields in Freekassa notification")
+            return False
+        
+        # Формируем подпись для проверки
+        sign_str = f"{merchant_id}:{amount}:{FREKASSA_SECRET_KEY2}:{merchant_order_id}"
+        expected_sign = hashlib.md5(sign_str.encode()).hexdigest()
+        
+        logger.info(f"Sign string: {sign_str}")
+        logger.info(f"Expected sign: {expected_sign}")
+        logger.info(f"Received sign: {received_sign}")
+        
+        return expected_sign.lower() == received_sign.lower()
+        
     except Exception as e:
-        logger.error(f"CryptoCloud test error: {e}")
-        return None, str(e)
+        logger.error(f"Error verifying Freekassa signature: {e}")
+        return False
+
+def check_payment_status(order_id, payment_system):
+    """Проверяет статус платежа (общая функция)"""
+    if payment_system == "Freekassa":
+        # Логика проверки для Freekassa
+        pass
+    elif payment_system == "CryptoCloud":
+        # Логика проверки для CryptoCloud
+        pass
+    return None

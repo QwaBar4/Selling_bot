@@ -77,7 +77,7 @@ async def handle_status_check(update: Update, context: ContextTypes.DEFAULT_TYPE
                     await context.bot.send_document(
                         user_id,
                         document=bytes(user['wireguard_config'], 'utf-8'),
-                        filename=f"wg_{user_id}.conf"
+                        filename = f"Sh1M_{str(user_id)[:4]}.conf"
                     )
                 return
         except:
@@ -139,7 +139,7 @@ async def grant_subscription(user_id: int, bot):
         await bot.send_document(
             user_id,
             document=bytes(client_data['config'], 'utf-8'),
-            filename=f"wg_{user_id}.conf"
+            filename = f"Sh1M_{str(user_id)[:4]}.conf"
         )
         logger.info(f"Конфиг успешно отправлен пользователю {user_id} (WG-Easy ID: {client_data['id']})")
 
