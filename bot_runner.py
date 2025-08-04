@@ -107,7 +107,7 @@ async def ask_for_payment_method(update: Update, context: ContextTypes.DEFAULT_T
     keyboard = [
         [InlineKeyboardButton(f"💳 Freekassa ({SUBSCRIPTION_PRICE_RUB} RUB)", callback_data='choose_freekassa')],
         [InlineKeyboardButton(f"💎 CryptoCloud ({SUBSCRIPTION_PRICE_USD} USD)", callback_data='pay_kryptocloud')],
-        [InlineKeyboardButton("⬅️ Назад", callback_data='back_to_start')]
+        [InlineKeyboardButton("⬅ Назад", callback_data='back_to_start')]
     ]
     await query.edit_message_text("Выберите удобный способ оплаты:", reply_markup=InlineKeyboardMarkup(keyboard))
     return SELECTING_PAYMENT
@@ -120,7 +120,7 @@ async def ask_freekassa_vpn_choice(update: Update, context: ContextTypes.DEFAULT
     keyboard = [
         [InlineKeyboardButton("✅ У меня есть VPN", callback_data='pay_freekassa_direct')],
         [InlineKeyboardButton("❌ У меня нет VPN", callback_data='need_temp_vpn')],
-        [InlineKeyboardButton("⬅️ Назад", callback_data='buy')]
+        [InlineKeyboardButton("⬅ Назад", callback_data='buy')]
     ]
     
     message = (
@@ -147,15 +147,15 @@ async def provide_temp_vpn_and_payment(update: Update, context: ContextTypes.DEF
     if payment_url:
         keyboard = [
             [InlineKeyboardButton("🔗 Перейти к оплате Freekassa", url=payment_url)],
-            [InlineKeyboardButton("⬅️ Назад в меню", callback_data='back_to_start')]
+            [InlineKeyboardButton("⬅ Назад в меню", callback_data='back_to_start')]
         ]
         
         message = (
             "🕐 **Временный VPN выдан на 10 минут!**\n\n"
-            "1️⃣ Импортируйте временный конфиг в WireGuard\n"
-            "2️⃣ Подключитесь к VPN\n"
-            "3️⃣ Нажмите кнопку ниже для оплаты\n\n"
-            "⚠️ После успешной оплаты временный конфиг будет отключен, "
+            "1 Импортируйте временный конфиг в WireGuard\n"
+            "2 Подключитесь к VPN\n"
+            "3 Нажмите кнопку ниже для оплаты\n\n"
+            "⚠ После успешной оплаты временный конфиг будет отключен, "
             "а вам будет выдан постоянный конфиг на весь период подписки."
         )
         

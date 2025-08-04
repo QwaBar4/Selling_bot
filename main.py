@@ -131,7 +131,7 @@ def payment_success():
     <html>
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="refresh" content="10; url=https://t.me/your_bot">
+        <meta http-equiv="refresh" content="10; url=https://t.me//sh4llow_bot">
         <title>Оплата успешна</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
@@ -322,7 +322,7 @@ def payment_failure():
     <html>
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="refresh" content="10; url=https://t.me/your_bot">
+        <meta http-equiv="refresh" content="10; url=https://t.me/sh4llow_bot">
         <title>Ошибка оплаты</title>
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@700&display=swap');
@@ -477,7 +477,7 @@ def payment_failure():
             <div class="info">
                 🚫 ПЛАТЕЖ НЕ БЫЛ ОБРАБОТАН!<br>
                 🔥 ПРОИЗОШЛА КРИТИЧЕСКАЯ ОШИБКА!<br><br>
-                ☠️ ВЕРНИТЕСЬ В TELEGRAM БОТ ДЛЯ ПОВТОРНОЙ ПОПЫТКИ
+                ☠ ВЕРНИТЕСЬ В TELEGRAM БОТ ДЛЯ ПОВТОРНОЙ ПОПЫТКИ
             </div>
             <div class="countdown">Автоматический переход через: <span id="timer">10</span> сек.</div>
         </div>
@@ -532,32 +532,3 @@ def payment_cancel():
     </body>
     </html>
     """
-
-# ========== UTILITY ENDPOINTS ==========
-
-@app.route('/health')
-def health():
-    """Проверка здоровья сервиса"""
-    return jsonify({
-        "status": "healthy",
-        "service": "wireguard_bot_webhook_server"
-    })
-
-@app.route('/')
-def index():
-    """Главная страница"""
-    return jsonify({
-        "service": "WireGuard Bot Webhook Server",
-        "status": "running",
-        "endpoints": {
-            "freekassa_webhook": "/webhook/freekassa",
-            "cryptocloud_webhook": "/webhook/cryptocloud",
-            "success_url": "/payment/success",
-            "failure_url": "/payment/failure",
-            "cancel_url": "/payment/cancel"
-        }
-    })
-
-if __name__ == '__main__':
-    init_db()
-    app.run(host='0.0.0.0', port=8000, debug=False)
