@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify, redirect
 from telegram import Bot
 import json 
 import asyncio
-from app.config import TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET, LOG_FILE
+from app.config import TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET, LOG_FILE, MAIN_ADMIN_ID, get_admin_ids
 from app.database import init_db, get_payment_by_order_id, update_payment_status
 from app.bot_logic import grant_subscription
 from app.payments import verify_freekassa_notification

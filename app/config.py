@@ -36,7 +36,21 @@ WG_SERVER_PORT = 51820
 WG_CLIENT_NETWORK = "10.10.10.0/24"
 
 # --- Админ ---
-ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")
+ADMIN_TELEGRAM_IDS_STR = os.getenv('ADMIN_TELEGRAM_IDS', '0')
+try:
+    # Парсим строку с ID админов, разделенных запятой
+    ADMIN_TELEGRAM_IDS = [int(id.strip()) for id in ADMIN_TELEGRAM_IDS_STR.split(',') if id.strip()]
+    if not ADMIN_TELEGRAM_IDS or ADMIN_TELEGRAM_IDS == [0]:
+        raise ValueError("No valid admin IDs provided")
+except (ValueError, AttributeError) as e:
+    raise ValueError(f"Invalid ADMIN_TELEGRAM_IDS format: {ADMIN_TELEGRAM_IDS_STR}. Use comma-separated integers.")
+
+# Основной админ (первый в списке) для критических уведомлений
+MAIN_ADMIN_ID = ADMIN_TELEGRAM_IDS[0]
+
+def get_admin_ids() -> list:
+    """Возвращает список ID администраторов"""
+    return ADMIN_TELEGRAM_IDS
 
 # --- База данных и Логи ---
 DB_NAME = "wg_bot.db"

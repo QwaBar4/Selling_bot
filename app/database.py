@@ -302,19 +302,30 @@ def get_expired_subscriptions() -> list:
     ]
 
 def deactivate_user_subscription(user_id: int):
-    """Деактивирует подписку пользователя"""
+    """Полностью деактивирует подписку пользователя"""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    cursor.execute('''
-        UPDATE users 
-        SET subscription_active = 0 
-        WHERE telegram_id = ?
-    ''', (user_id,))
-    
-    conn.commit()
-    conn.close()
-    logger.info(f"Deactivated subscription for user {user_id}")
+    try:
+        cursor.execute('''
+            UPDATE users 
+            SET subscription_end_date = NULL,
+                wireguard_config = NULL,
+                client_ip = NULL,
+                wg_easy_client_id = NULL
+            WHERE telegram_id = ?
+        ''', (user_id,))
+        
+        conn.commit()
+        logger.info(f"Подписка пользователя {user_id} полностью деактивирована в БД")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при деактивации подписки пользователя {user_id}: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
 
 def add_payment(user_id: int, amount: float, currency: str, payment_system: str, order_id: str, status: str = 'pending'):
     """Добавляет запись о платеже с обработкой ошибок"""
@@ -448,3 +459,107 @@ def get_user_stats() -> dict:
         'active_temp_configs': active_temp_configs,
         'recent_payments': recent_payments
     }
+
+
+def get_user_by_username(username: str):
+    """Получает пользователя по username"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT telegram_id, username, first_name, subscription_end_date, 
+               wireguard_config, client_ip, wg_easy_client_id, subscription_active
+        FROM users 
+        WHERE username = ? COLLATE NOCASE
+    """, (username,))
+    
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            'telegram_id': row[0],
+            'username': row[1],
+            'first_name': row[2],
+            'subscription_end_date': row[3],
+            'wireguard_config': row[4],
+            'client_ip': row[5],
+            'wg_easy_client_id': row[6],
+            'subscription_active': bool(row[7])
+        }
+    return None
+
+def get_all_users() -> list:
+    """Получает всех пользователей из базы данных"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT telegram_id, username, first_name, subscription_end_date, 
+               subscription_active, created_at
+        FROM users
+        ORDER BY created_at DESC
+    ''')
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    return [
+        {
+            'telegram_id': row[0],
+            'username': row[1],
+            'first_name': row[2],
+            'subscription_end_date': row[3],
+            'subscription_active': bool(row[4]),
+            'created_at': row[5]
+        }
+        for row in rows
+    ]
+
+def get_all_users_with_subscriptions():
+    """Получает всех пользователей с подписками для админки"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT telegram_id, username, first_name, subscription_end_date, client_ip, subscription_active
+        FROM users 
+        WHERE subscription_end_date IS NOT NULL
+        ORDER BY subscription_end_date DESC
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    users = []
+    for row in rows:
+        users.append({
+            'telegram_id': row[0],
+            'username': row[1] or 'Без username',
+            'first_name': row[2] or 'Без имени',
+            'subscription_end_date': row[3],
+            'client_ip': row[4],
+            'subscription_active': bool(row[5])
+        })
+    
+    return users
+
+def delete_user_subscription(telegram_id: int):
+    """Удаляет подписку пользователя"""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        UPDATE users 
+        SET subscription_end_date = NULL,
+            wireguard_config = NULL,
+            client_ip = NULL,
+            wg_easy_client_id = NULL,
+            subscription_active = 0
+        WHERE telegram_id = ?
+    """, (telegram_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    logger.info(f"Подписка пользователя {telegram_id} удалена из БД")
